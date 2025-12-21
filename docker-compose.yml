@@ -1,5 +1,5 @@
 services:
-  tick-store:
+  binance-last-price-store:
     build: .
     restart: unless-stopped
     ports:

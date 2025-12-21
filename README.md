@@ -1,4 +1,4 @@
-# Binance Symbol Tick Store
+# Binance Last Price Store
 
 Captures real-time price ticks from Binance USD-M Futures WebSocket streams and stores them in SQLite. Solves the problem that Binance provides kline history but not individual tick data.
 
@@ -13,7 +13,7 @@ make status             # Check app status
 Wait ~60 seconds for the watcher to pick up the new symbol. Check status again:
 
 ```
-Binance Tick Store
+Binance Last Price Store
 
 Status:     running
 Uptime:     2m
@@ -34,6 +34,32 @@ make disable BTCUSDT  # Stop tracking symbol
 make build            # Build binary locally
 make test             # Run tests
 ```
+
+## Running with Docker
+
+Everything already included in a container. No other dependencies or configuration needed.
+
+1. Start the container:
+   ```bash
+   docker compose up -d
+   ```
+
+2. Enable symbols to track:
+   ```bash
+   docker compose exec binance-last-price-store make enable BTCUSDT
+   docker compose exec binance-last-price-store make enable ETHUSDT
+   ```
+
+3. Check status (wait ~60s for watcher to pick up changes):
+   ```bash
+   docker compose exec binance-last-price-store make status
+   ```
+
+4. (Optional) Query database if needed:
+   ```bash
+   docker compose exec binance-last-price-store sqlite3 /app/.data/ticks.db \
+     "SELECT * FROM prices_BTCUSDT ORDER BY id DESC LIMIT 5;"
+   ```
 
 ## How It Works
 

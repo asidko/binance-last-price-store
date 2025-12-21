@@ -45,7 +45,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	active := h.status.GetActiveSymbols()
 
 	var sb strings.Builder
-	sb.WriteString("Binance Tick Store\n\n")
+	sb.WriteString("Binance Last Price Store\n\n")
 	sb.WriteString(fmt.Sprintf("Status:     running\n"))
 	sb.WriteString(fmt.Sprintf("Uptime:     %s\n\n", uptime))
 

@@ -27,7 +27,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	slog.Info("starting binance tick store")
+	slog.Info("starting binance last price store")
 	slog.Info("config loaded", "db_path", cfg.DBPath, "http_port", cfg.HTTPPort, "log_level", cfg.LogLevel.String())
 
 	store, err := database.Open(cfg.DBPath)
