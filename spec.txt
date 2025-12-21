@@ -22,13 +22,14 @@ WebSocket Endpoint:
   - Binance USD-M Futures WebSocket
   - Stream: @aggTrade (aggregated trades)
   - URL: wss://fstream.binance.com/ws/<symbol>@aggTrade
+  - One connection per enabled symbol (isolated failures)
 
 Data Captured Per Tick:
   - timestamp  (INTEGER) - Trade time in milliseconds (Unix epoch)
   - price      (REAL)    - Trade price
 
 Frequency:
-  - Every tick stored (no sampling/aggregation)
+  - Every tick stored immediately (no batching)
 
 Retention:
   - Keep forever (no auto-cleanup)
@@ -38,14 +39,22 @@ Retention:
                               DATABASE
 ================================================================================
 
-Engine: SQLite
+Engine: SQLite with WAL mode
+Driver: modernc.org/sqlite (pure Go, no CGO)
+Concurrency: Single connection with mutex
 
 Location: Configurable via DB_PATH environment variable
-  - Default: ./data/ticks.db
+  - Default: ./.data/ticks.db
+  - Directory auto-created if missing
+  - Directory is gitignored
 
 Tables:
   1. symbol_settings  - Configuration for symbols to track
   2. prices_<SYMBOL>  - Auto-created per symbol (e.g., prices_BTCUSDT)
+
+Error Handling:
+  - On write failure: log error, skip tick, continue
+  - No retries (prevents blocking on persistent failures)
 
 --------------------------------------------------------------------------------
 TABLE: symbol_settings
@@ -57,6 +66,7 @@ CREATE TABLE symbol_settings (
 
 - symbol:  Trading pair symbol (e.g., 'BTCUSDT')
 - enabled: 1 = actively listening, 0 = paused
+- Starts empty (use "make enable SYMBOL" to add)
 
 Usage:
   - INSERT INTO symbol_settings (symbol) VALUES ('BTCUSDT');
@@ -82,7 +92,7 @@ CREATE INDEX idx_prices_BTCUSDT_timestamp ON prices_BTCUSDT(timestamp);
 ================================================================================
 
 Environment Variables:
-  - DB_PATH    : Path to SQLite database (default: ./data/ticks.db)
+  - DB_PATH    : Path to SQLite database (default: ./.data/ticks.db)
   - HTTP_PORT  : Status endpoint port (default: 8080)
 
 
@@ -98,11 +108,14 @@ Behavior:
   - Start WebSocket connection for newly enabled symbols
   - Stop WebSocket connection for disabled/removed symbols
   - No application restart required for configuration changes
+  - No symbol validation (invalid symbols logged as errors)
 
 
 ================================================================================
                          WEBSOCKET HANDLING
 ================================================================================
+
+Library: gorilla/websocket
 
 Connection:
   - One WebSocket connection per enabled symbol
@@ -129,20 +142,33 @@ Port: Configurable via HTTP_PORT (default: 8080)
 Endpoint: GET /status
 
 Response: Beautifully formatted plain text (no colors, no fancy borders)
+Timezone: UTC
+Health Check: Returns HTTP 200 (used by Docker for container health)
 
-Example Output:
-----------------
-Binance Tick Store Status
+Example Output (app running):
+-----------------------------
+Binance Tick Store
+
+Status:     running
+Uptime:     2d 14h 32m
 
 BTCUSDT     on      2024-01-15 08:32:01  ->  2024-12-21 14:23:45
 ETHUSDT     on      2024-01-15 08:32:05  ->  2024-12-21 14:23:44
 SOLUSDT     off     2024-03-01 12:00:00  ->  2024-06-15 18:30:22
 ADAUSDT     on      (no data yet)
 
+Example Output (app not reachable via make status):
+----------------------------------------------------
+Binance Tick Store
+
+Status:     stopped (connection refused)
+
 Information Shown:
+  - App status: running/stopped
+  - Uptime (when running)
   - Symbol name
   - Status: on/off (based on enabled flag + active connection)
-  - Date range: first tick timestamp -> last tick timestamp
+  - Date range: first tick timestamp -> last tick timestamp (UTC)
   - "(no data yet)" if table is empty
 
 
@@ -150,6 +176,7 @@ Information Shown:
                              LOGGING
 ================================================================================
 
+Library: log/slog (Go stdlib)
 Output: stdout (captured by Docker)
 Format: Plain text (not JSON)
 
@@ -158,17 +185,17 @@ Log Events:
   - WebSocket connected/disconnected per symbol
   - Reconnection attempts
   - Settings changes detected
-  - Errors
+  - Errors (including DB write failures)
 
 
 ================================================================================
                             DEPLOYMENT
 ================================================================================
 
-Docker Compose:
-  - Restart policy: unless-stopped (or always)
-  - Volume mount for database persistence
-  - Environment variables for configuration
+Docker:
+  - Build stage: golang:1.26
+  - Runtime stage: alpine (multi-stage build)
+  - Restart policy: unless-stopped
 
 Example docker-compose.yml structure:
   services:
@@ -178,9 +205,9 @@ Example docker-compose.yml structure:
       ports:
         - "8080:8080"
       volumes:
-        - ./data:/app/data
+        - ./.data:/app/.data
       environment:
-        - DB_PATH=/app/data/ticks.db
+        - DB_PATH=/app/.data/ticks.db
         - HTTP_PORT=8080
 
 
@@ -193,22 +220,71 @@ Commands:
   make build
     - Compile Go binary
 
+  make test
+    - Run all tests
+    - Equivalent to: go test ./...
+
   make run
     - Build + start via docker-compose
     - Equivalent to: docker-compose up --build -d
 
+  make stop
+    - Stop the container
+    - Equivalent to: docker-compose down
+
   make status
     - Curl the /status endpoint
-    - Display formatted output
+    - If reachable: display app status + symbols
+    - If not reachable: display "stopped (connection refused)"
+
+  make logs
+    - Tail container logs
+    - Equivalent to: docker-compose logs -f
+
+  make enable SYMBOL
+    - Add symbol to database (if missing) and enable it
+    - Auto-uppercase: "make enable ethusdt" -> ETHUSDT
+    - Example: make enable ethusdt
+
+  make disable SYMBOL
+    - Disable symbol in database
+    - Example: make disable ETHUSDT
 
 
 ================================================================================
                            TECHNOLOGY
 ================================================================================
 
-Language: Go 1.23 (latest)
-Database: SQLite (via modernc.org/sqlite or mattn/go-sqlite3)
-WebSocket: gorilla/websocket or nhooyr.io/websocket
+Language:   Go 1.26
+Module:     binance-tick-store
+Database:   SQLite via modernc.org/sqlite (pure Go, no CGO)
+WebSocket:  gorilla/websocket
+Logging:    log/slog (stdlib)
+Docker:     Multi-stage (golang:1.26 -> alpine)
+
+Graceful Shutdown:
+  - Catch SIGINT/SIGTERM
+  - 5 second timeout for pending operations
+  - Close WebSocket connections, then exit
+
+
+================================================================================
+                             TESTING
+================================================================================
+
+Approach: Write tests alongside implementation
+
+Coverage:
+  - Database operations (using in-memory SQLite)
+  - Config loading
+  - Settings watcher logic
+  - WebSocket client (with mocking for better code organization)
+
+Test Files:
+  - internal/database/database_test.go
+  - internal/config/config_test.go
+  - internal/settings/watcher_test.go
+  - internal/websocket/client_test.go
 
 
 ================================================================================
@@ -222,14 +298,16 @@ WebSocket: gorilla/websocket or nhooyr.io/websocket
    - Auto-reconnect WebSocket with backoff
    - Graceful handling of network failures
    - Docker restart policy as safety net
+   - Log and skip on write failures
 
 3. Simplicity
    - No over-engineering
    - Direct SQL for configuration (no admin API)
    - Minimal dependencies
+   - No symbol validation (just log errors)
 
 4. Reliability
-   - SQLite for durability
+   - SQLite with WAL mode for durability
    - Each symbol isolated (one connection per symbol)
    - Settings watcher for dynamic reconfiguration
 
@@ -253,8 +331,8 @@ binance-symbol-tick-store/
 │   │   └── client.go         # Binance WebSocket handling
 │   └── http/
 │       └── status.go         # Status endpoint handler
-├── data/
-│   └── .gitkeep              # Database directory
+├── .data/                    # Database directory (gitignored)
+├── .gitignore
 ├── Dockerfile
 ├── docker-compose.yml
 ├── Makefile
