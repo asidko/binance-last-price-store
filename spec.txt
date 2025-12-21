@@ -130,16 +130,27 @@ Endpoint: GET /status
 
 Response: Beautifully formatted plain text (no colors, no fancy borders)
 
-Example Output:
-----------------
-Binance Tick Store Status
+Example Output (app running):
+-----------------------------
+Binance Tick Store
+
+Status:     running
+Uptime:     2d 14h 32m
 
 BTCUSDT     on      2024-01-15 08:32:01  ->  2024-12-21 14:23:45
 ETHUSDT     on      2024-01-15 08:32:05  ->  2024-12-21 14:23:44
 SOLUSDT     off     2024-03-01 12:00:00  ->  2024-06-15 18:30:22
 ADAUSDT     on      (no data yet)
 
+Example Output (app not reachable via make status):
+----------------------------------------------------
+Binance Tick Store
+
+Status:     stopped (connection refused)
+
 Information Shown:
+  - App status: running/stopped
+  - Uptime (when running)
   - Symbol name
   - Status: on/off (based on enabled flag + active connection)
   - Date range: first tick timestamp -> last tick timestamp
@@ -199,7 +210,8 @@ Commands:
 
   make status
     - Curl the /status endpoint
-    - Display formatted output
+    - If reachable: display app status + symbols
+    - If not reachable: display "stopped (connection refused)"
 
 
 ================================================================================
