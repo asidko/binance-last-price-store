@@ -6,6 +6,33 @@ import (
 	"testing"
 )
 
+func TestValidateSymbol(t *testing.T) {
+	tests := []struct {
+		symbol string
+		valid  bool
+	}{
+		{"BTCUSDT", true},
+		{"btcusdt", true},
+		{"BTC123", true},
+		{"123", true},
+		{"BTC-USDT", false},
+		{"BTC_USDT", false},
+		{"BTC USDT", false},
+		{"BTC;DROP TABLE", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		err := ValidateSymbol(tt.symbol)
+		if tt.valid && err != nil {
+			t.Errorf("ValidateSymbol(%q) = error, want valid", tt.symbol)
+		}
+		if !tt.valid && err == nil {
+			t.Errorf("ValidateSymbol(%q) = valid, want error", tt.symbol)
+		}
+	}
+}
+
 func TestOpen_CreatesDirectory(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "subdir", "test.db")
@@ -65,6 +92,20 @@ func TestPriceTable(t *testing.T) {
 
 	if dr.From == nil || dr.To == nil {
 		t.Error("expected non-nil date range")
+	}
+}
+
+func TestPriceTable_InvalidSymbol(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer store.Close()
+
+	// Invalid symbol should fail
+	if err := store.EnsurePriceTable("BTC;DROP TABLE"); err == nil {
+		t.Error("expected error for invalid symbol")
 	}
 }
 

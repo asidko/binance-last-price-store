@@ -19,10 +19,16 @@ import (
 )
 
 func main() {
-	slog.Info("starting binance tick store")
-
 	cfg := config.Load()
-	slog.Info("config loaded", "db_path", cfg.DBPath, "http_port", cfg.HTTPPort)
+
+	// Configure logger
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: cfg.LogLevel,
+	}))
+	slog.SetDefault(logger)
+
+	slog.Info("starting binance tick store")
+	slog.Info("config loaded", "db_path", cfg.DBPath, "http_port", cfg.HTTPPort, "log_level", cfg.LogLevel.String())
 
 	store, err := database.Open(cfg.DBPath)
 	if err != nil {
@@ -43,11 +49,14 @@ func main() {
 	// Process settings changes
 	go app.handleChanges(ctx, changes)
 
-	// Start HTTP server
+	// Start HTTP server with timeouts
 	handler := httpHandler.NewHandler(store, app)
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.HTTPPort),
-		Handler: handler,
+		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
+		Handler:      handler,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	go func() {
