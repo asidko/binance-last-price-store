@@ -18,12 +18,6 @@ type SymbolSettings struct {
 	Enabled bool
 }
 
-// PriceRecord represents a single price tick.
-type PriceRecord struct {
-	Timestamp int64
-	Price     float64
-}
-
 // DateRange represents min/max timestamps for a symbol.
 type DateRange struct {
 	From *time.Time
