@@ -66,6 +66,7 @@ CREATE TABLE symbol_settings (
 
 - symbol:  Trading pair symbol (e.g., 'BTCUSDT')
 - enabled: 1 = actively listening, 0 = paused
+- Starts empty (use "make enable SYMBOL" to add)
 
 Usage:
   - INSERT INTO symbol_settings (symbol) VALUES ('BTCUSDT');
@@ -142,6 +143,7 @@ Endpoint: GET /status
 
 Response: Beautifully formatted plain text (no colors, no fancy borders)
 Timezone: UTC
+Health Check: Returns HTTP 200 (used by Docker for container health)
 
 Example Output (app running):
 -----------------------------
@@ -218,6 +220,10 @@ Commands:
   make build
     - Compile Go binary
 
+  make test
+    - Run all tests
+    - Equivalent to: go test ./...
+
   make run
     - Build + start via docker-compose
     - Equivalent to: docker-compose up --build -d
@@ -235,16 +241,50 @@ Commands:
     - Tail container logs
     - Equivalent to: docker-compose logs -f
 
+  make enable SYMBOL
+    - Add symbol to database (if missing) and enable it
+    - Auto-uppercase: "make enable ethusdt" -> ETHUSDT
+    - Example: make enable ethusdt
+
+  make disable SYMBOL
+    - Disable symbol in database
+    - Example: make disable ETHUSDT
+
 
 ================================================================================
                            TECHNOLOGY
 ================================================================================
 
 Language:   Go 1.26
+Module:     binance-tick-store
 Database:   SQLite via modernc.org/sqlite (pure Go, no CGO)
 WebSocket:  gorilla/websocket
 Logging:    log/slog (stdlib)
 Docker:     Multi-stage (golang:1.26 -> alpine)
+
+Graceful Shutdown:
+  - Catch SIGINT/SIGTERM
+  - 5 second timeout for pending operations
+  - Close WebSocket connections, then exit
+
+
+================================================================================
+                             TESTING
+================================================================================
+
+Approach: Write tests alongside implementation
+
+Coverage:
+  - Database operations (using in-memory SQLite)
+  - Config loading
+  - Settings watcher logic
+  - WebSocket client (with mocking for better code organization)
+
+Test Files:
+  - internal/database/database_test.go
+  - internal/config/config_test.go
+  - internal/settings/watcher_test.go
+  - internal/websocket/client_test.go
 
 
 ================================================================================
