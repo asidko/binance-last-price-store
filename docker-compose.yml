@@ -1,0 +1,11 @@
+services:
+  tick-store:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./.data:/app/.data
+    environment:
+      - DB_PATH=/app/.data/ticks.db
+      - HTTP_PORT=8080
