@@ -16,7 +16,7 @@ stop:
 	docker compose down
 
 status:
-	@curl -s http://localhost:8080/status 2>/dev/null || echo "Binance Tick Store\n\nStatus:     stopped (connection refused)"
+	@curl -s http://localhost:8080/status 2>/dev/null || printf "Binance Tick Store\n\nStatus:     stopped (connection refused)\n"
 
 logs:
 	docker compose logs -f

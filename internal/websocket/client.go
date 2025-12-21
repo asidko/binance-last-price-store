@@ -67,8 +67,11 @@ func (c *client) Run(ctx context.Context) {
 		default:
 		}
 
-		if err := c.connect(ctx); err != nil {
+		err := c.connect(ctx)
+		if err != nil {
 			slog.Error("websocket error", "symbol", c.symbol, "error", err)
+		} else {
+			backoff = time.Second // Reset backoff on clean disconnect
 		}
 
 		select {
@@ -87,19 +90,21 @@ func (c *client) connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
-	defer conn.Close()
+
+	// Close connection when context is cancelled
+	go func() {
+		<-ctx.Done()
+		conn.Close()
+	}()
 
 	slog.Info("websocket connected", "symbol", c.symbol)
 
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil // Clean shutdown
+			}
 			return fmt.Errorf("read: %w", err)
 		}
 

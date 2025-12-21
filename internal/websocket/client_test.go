@@ -10,16 +10,19 @@ import (
 type mockConn struct {
 	messages [][]byte
 	index    int
-	closed   bool
+	closeCh  chan struct{}
+}
+
+func newMockConn(messages [][]byte) *mockConn {
+	return &mockConn{
+		messages: messages,
+		closeCh:  make(chan struct{}),
+	}
 }
 
 func (m *mockConn) ReadMessage() (int, []byte, error) {
-	if m.closed {
-		return 0, nil, errors.New("connection closed")
-	}
 	if m.index >= len(m.messages) {
-		// Block until closed
-		time.Sleep(time.Hour)
+		<-m.closeCh
 		return 0, nil, errors.New("connection closed")
 	}
 	msg := m.messages[m.index]
@@ -28,7 +31,11 @@ func (m *mockConn) ReadMessage() (int, []byte, error) {
 }
 
 func (m *mockConn) Close() error {
-	m.closed = true
+	select {
+	case <-m.closeCh:
+	default:
+		close(m.closeCh)
+	}
 	return nil
 }
 
@@ -64,12 +71,10 @@ func TestParseAggTrade(t *testing.T) {
 }
 
 func TestClient_ReceivesTicks(t *testing.T) {
-	conn := &mockConn{
-		messages: [][]byte{
-			[]byte(`{"T":1700000000000,"p":"42000.00"}`),
-			[]byte(`{"T":1700000001000,"p":"42001.00"}`),
-		},
-	}
+	conn := newMockConn([][]byte{
+		[]byte(`{"T":1700000000000,"p":"42000.00"}`),
+		[]byte(`{"T":1700000001000,"p":"42001.00"}`),
+	})
 	dialer := &mockDialer{conn: conn}
 
 	var ticks []Tick
