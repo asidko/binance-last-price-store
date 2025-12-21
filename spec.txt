@@ -1,0 +1,266 @@
+================================================================================
+                    BINANCE SYMBOL TICK STORE - SPECIFICATION
+================================================================================
+
+OVERVIEW
+--------
+A Go application that listens to Binance USD-M Futures WebSocket streams and
+stores real-time price ticks in SQLite. Designed for robustness, reliability,
+and simplicity.
+
+PURPOSE
+-------
+Binance provides kline history but not precise price ticks. This service
+captures and stores every aggTrade tick for configured symbols.
+
+
+================================================================================
+                              DATA SOURCE
+================================================================================
+
+WebSocket Endpoint:
+  - Binance USD-M Futures WebSocket
+  - Stream: @aggTrade (aggregated trades)
+  - URL: wss://fstream.binance.com/ws/<symbol>@aggTrade
+
+Data Captured Per Tick:
+  - timestamp  (INTEGER) - Trade time in milliseconds (Unix epoch)
+  - price      (REAL)    - Trade price
+
+Frequency:
+  - Every tick stored (no sampling/aggregation)
+
+Retention:
+  - Keep forever (no auto-cleanup)
+
+
+================================================================================
+                              DATABASE
+================================================================================
+
+Engine: SQLite
+
+Location: Configurable via DB_PATH environment variable
+  - Default: ./data/ticks.db
+
+Tables:
+  1. symbol_settings  - Configuration for symbols to track
+  2. prices_<SYMBOL>  - Auto-created per symbol (e.g., prices_BTCUSDT)
+
+--------------------------------------------------------------------------------
+TABLE: symbol_settings
+--------------------------------------------------------------------------------
+CREATE TABLE symbol_settings (
+    symbol  TEXT PRIMARY KEY,
+    enabled INTEGER DEFAULT 1
+);
+
+- symbol:  Trading pair symbol (e.g., 'BTCUSDT')
+- enabled: 1 = actively listening, 0 = paused
+
+Usage:
+  - INSERT INTO symbol_settings (symbol) VALUES ('BTCUSDT');
+  - UPDATE symbol_settings SET enabled = 0 WHERE symbol = 'BTCUSDT';
+  - DELETE FROM symbol_settings WHERE symbol = 'BTCUSDT';
+
+--------------------------------------------------------------------------------
+TABLE: prices_<SYMBOL>  (auto-created per symbol)
+--------------------------------------------------------------------------------
+CREATE TABLE prices_BTCUSDT (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    price     REAL NOT NULL
+);
+
+CREATE INDEX idx_prices_BTCUSDT_timestamp ON prices_BTCUSDT(timestamp);
+
+- Index on timestamp for efficient date range queries
+
+
+================================================================================
+                           CONFIGURATION
+================================================================================
+
+Environment Variables:
+  - DB_PATH    : Path to SQLite database (default: ./data/ticks.db)
+  - HTTP_PORT  : Status endpoint port (default: 8080)
+
+
+================================================================================
+                        SETTINGS WATCHER
+================================================================================
+
+Polling Interval: 60 seconds
+
+Behavior:
+  - Query symbol_settings table periodically
+  - Detect changes: new symbols, removed symbols, enabled/disabled toggles
+  - Start WebSocket connection for newly enabled symbols
+  - Stop WebSocket connection for disabled/removed symbols
+  - No application restart required for configuration changes
+
+
+================================================================================
+                         WEBSOCKET HANDLING
+================================================================================
+
+Connection:
+  - One WebSocket connection per enabled symbol
+  - Stream: wss://fstream.binance.com/ws/<symbol_lowercase>@aggTrade
+
+Reconnection Strategy:
+  - On disconnect: immediate retry
+  - On failure: exponential backoff
+    - Sequence: 1s, 2s, 4s, 8s, 16s, 30s (max)
+  - Continue retrying indefinitely
+
+Message Processing:
+  - Parse aggTrade message
+  - Extract: timestamp (T field), price (p field)
+  - Insert into prices_<SYMBOL> table
+
+
+================================================================================
+                          HTTP STATUS ENDPOINT
+================================================================================
+
+Port: Configurable via HTTP_PORT (default: 8080)
+
+Endpoint: GET /status
+
+Response: Beautifully formatted plain text (no colors, no fancy borders)
+
+Example Output:
+----------------
+Binance Tick Store Status
+
+BTCUSDT     on      2024-01-15 08:32:01  ->  2024-12-21 14:23:45
+ETHUSDT     on      2024-01-15 08:32:05  ->  2024-12-21 14:23:44
+SOLUSDT     off     2024-03-01 12:00:00  ->  2024-06-15 18:30:22
+ADAUSDT     on      (no data yet)
+
+Information Shown:
+  - Symbol name
+  - Status: on/off (based on enabled flag + active connection)
+  - Date range: first tick timestamp -> last tick timestamp
+  - "(no data yet)" if table is empty
+
+
+================================================================================
+                             LOGGING
+================================================================================
+
+Output: stdout (captured by Docker)
+Format: Plain text (not JSON)
+
+Log Events:
+  - Application startup
+  - WebSocket connected/disconnected per symbol
+  - Reconnection attempts
+  - Settings changes detected
+  - Errors
+
+
+================================================================================
+                            DEPLOYMENT
+================================================================================
+
+Docker Compose:
+  - Restart policy: unless-stopped (or always)
+  - Volume mount for database persistence
+  - Environment variables for configuration
+
+Example docker-compose.yml structure:
+  services:
+    tick-store:
+      build: .
+      restart: unless-stopped
+      ports:
+        - "8080:8080"
+      volumes:
+        - ./data:/app/data
+      environment:
+        - DB_PATH=/app/data/ticks.db
+        - HTTP_PORT=8080
+
+
+================================================================================
+                             MAKEFILE
+================================================================================
+
+Commands:
+
+  make build
+    - Compile Go binary
+
+  make run
+    - Build + start via docker-compose
+    - Equivalent to: docker-compose up --build -d
+
+  make status
+    - Curl the /status endpoint
+    - Display formatted output
+
+
+================================================================================
+                           TECHNOLOGY
+================================================================================
+
+Language: Go 1.23 (latest)
+Database: SQLite (via modernc.org/sqlite or mattn/go-sqlite3)
+WebSocket: gorilla/websocket or nhooyr.io/websocket
+
+
+================================================================================
+                        DESIGN PRINCIPLES
+================================================================================
+
+1. Single Responsibility
+   - One job: capture and store price ticks
+
+2. Robustness
+   - Auto-reconnect WebSocket with backoff
+   - Graceful handling of network failures
+   - Docker restart policy as safety net
+
+3. Simplicity
+   - No over-engineering
+   - Direct SQL for configuration (no admin API)
+   - Minimal dependencies
+
+4. Reliability
+   - SQLite for durability
+   - Each symbol isolated (one connection per symbol)
+   - Settings watcher for dynamic reconfiguration
+
+
+================================================================================
+                          PROJECT STRUCTURE
+================================================================================
+
+binance-symbol-tick-store/
+├── cmd/
+│   └── server/
+│       └── main.go           # Entry point
+├── internal/
+│   ├── config/
+│   │   └── config.go         # Environment variable loading
+│   ├── database/
+│   │   └── database.go       # SQLite connection, table creation
+│   ├── settings/
+│   │   └── watcher.go        # Settings table polling
+│   ├── websocket/
+│   │   └── client.go         # Binance WebSocket handling
+│   └── http/
+│       └── status.go         # Status endpoint handler
+├── data/
+│   └── .gitkeep              # Database directory
+├── Dockerfile
+├── docker-compose.yml
+├── Makefile
+├── go.mod
+├── go.sum
+└── spec.txt
+
+
+================================================================================
