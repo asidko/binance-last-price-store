@@ -81,6 +81,11 @@ sqlite3 .data/ticks.db "SELECT * FROM prices_BTCUSDT ORDER BY id DESC LIMIT 5;"
 # ...
 ```
 
+```
+# Export DOGEUSDT to CSV
+sqlite3 -header -csv .data/ticks.db "SELECT * FROM prices_DOGEUSDT;" > prices_DOGEUSDT.csv
+```
+
 Timestamps are Unix milliseconds (Binance trade time).
 
 ## Development
